@@ -4910,6 +4910,2264 @@ script.Destroying:Connect(
 		end
 	end
 )
+			z
+		)
+
+	wandering = true
+
+	stopTrack(quirkTrack)
+
+	wanderTimer = 0
+
+	nextWanderTime =
+		random:NextNumber(
+			WANDER_MIN_TIME,
+			WANDER_MAX_TIME
+		)
+end
+
+
+local function chooseStrangerWander()
+
+	if not companionRoot
+		or not strangerHomePosition then
+
+		return
+	end
+
+	local distance =
+		random:NextNumber(
+			2,
+			STRANGER_WANDER_DISTANCE
+		)
+
+	local angle =
+		random:NextNumber(
+			0,
+			math.pi * 2
+		)
+
+	local offset =
+		Vector3.new(
+			math.cos(angle) * distance,
+			0,
+			math.sin(angle) * distance
+		)
+
+	wanderOffset =
+		strangerHomePosition
+		+ offset
+		- companionRoot.Position
+
+	wanderOffset =
+		Vector3.new(
+			wanderOffset.X,
+			0,
+			wanderOffset.Z
+		)
+
+	wandering = true
+
+	wanderTimer = 0
+
+	nextWanderTime =
+		random:NextNumber(
+			2.5,
+			6
+		)
+end
+
+
+local function getMovementRelationshipStage()
+	if not friendshipEnabled then
+		return "Friend"
+	end
+
+	return getRelationshipStage(friendshipValue).Name
+end
+
+local function beginSocialApproach()
+	if not companionRoot or not player.Character then
+		return false
+	end
+
+	local playerRoot =
+		player.Character:FindFirstChild("HumanoidRootPart")
+
+	if not playerRoot then
+		return false
+	end
+
+	local stageName = getMovementRelationshipStage()
+
+	if stageName == "Friend"
+		or stageName == "Best Friend" then
+		return false
+	end
+
+	local chance =
+		stageName == "Acquaintance"
+		and ACQUAINTANCE_APPROACH_CHANCE
+		or STRANGER_APPROACH_CHANCE
+
+	if random:NextNumber() > chance then
+		return false
+	end
+
+	socialApproachActive = true
+	socialApproachTimer = 0
+	socialApproachDuration =
+		random:NextNumber(
+			SOCIAL_APPROACH_DURATION_MIN,
+			SOCIAL_APPROACH_DURATION_MAX
+		)
+
+	wanderOffset = Vector3.zero
+	wandering = false
+	doingQuirk = false
+
+	return true
+end
+
+local function endSocialApproach()
+	socialApproachActive = false
+	socialApproachTimer = 0
+	nextSocialApproachTime =
+		random:NextNumber(
+			SOCIAL_APPROACH_MIN_TIME,
+			SOCIAL_APPROACH_MAX_TIME
+		)
+
+	wanderOffset = Vector3.zero
+	wandering = false
+	wanderTimer = 0
+	nextWanderTime =
+		random:NextNumber(2, 5)
+end
+
+
+local function chooseIdleAction()
+
+	if not companionRoot
+		or not currentProfile then
+
+		return
+	end
+
+	wanderOffset =
+		Vector3.zero
+
+	wandering = false
+	wanderTimer = 0
+
+	local canQuirk =
+		quirkTrack ~= nil
+
+	if canQuirk
+		and random:NextNumber() < 0.35 then
+
+		doingQuirk = true
+
+		stopTrack(idleTrack)
+
+		if quirkTrack
+			and not quirkTrack.IsPlaying then
+
+			quirkTrack:Play(0.2)
+		end
+
+		if random:NextNumber() < 0.35 then
+			randomChat()
+		end
+
+		quirkTimer = 0
+
+		nextQuirkTime =
+			random:NextNumber(
+				QUIRK_MIN_TIME,
+				QUIRK_MAX_TIME
+			)
+
+		return
+	end
+
+	doingQuirk = false
+
+	chooseWander()
+end
+
+
+local function moveCompanionTowards(
+	currentPosition,
+	targetPosition,
+	speed,
+	deltaTime
+)
+
+	if not companion then
+		return currentPosition, 0
+	end
+
+	local offset =
+		targetPosition
+		- currentPosition
+
+	local distance =
+		offset.Magnitude
+
+	if distance < 0.001 then
+		return currentPosition, distance
+	end
+
+	local direction =
+		offset.Unit
+
+	local step =
+		math.min(
+			distance,
+			speed * deltaTime
+		)
+
+	local newPosition =
+		currentPosition
+		+ direction * step
+
+	local currentCFrame =
+		companion:GetPivot()
+
+	local currentLook =
+		Vector3.new(
+			currentCFrame.LookVector.X,
+			0,
+			currentCFrame.LookVector.Z
+		)
+
+	local targetLook =
+		Vector3.new(
+			direction.X,
+			0,
+			direction.Z
+		)
+
+	if targetLook.Magnitude < 0.001 then
+		targetLook = currentLook
+	end
+
+	if currentLook.Magnitude < 0.001 then
+		currentLook = targetLook
+	else
+		currentLook =
+			currentLook.Unit
+	end
+
+	if targetLook.Magnitude < 0.001 then
+		targetLook =
+			Vector3.new(
+				0,
+				0,
+				-1
+			)
+	else
+		targetLook =
+			targetLook.Unit
+	end
+
+	local lookAlpha =
+		math.clamp(
+			TURN_SPEED * deltaTime,
+			0,
+			1
+		)
+
+	local newLook =
+		currentLook:Lerp(
+			targetLook,
+			lookAlpha
+		)
+
+	if newLook.Magnitude < 0.001 then
+		newLook = targetLook
+	else
+		newLook =
+			newLook.Unit
+	end
+
+	companion:PivotTo(
+		CFrame.lookAt(
+			newPosition,
+			newPosition + newLook
+		)
+	)
+
+	return newPosition, distance
+end
+
+
+local function canSeePlayer(playerRoot)
+
+	if not companionRoot
+		or not playerRoot then
+
+		return false
+	end
+
+	local origin =
+		companionRoot.Position
+		+ Vector3.new(0, 2, 0)
+
+	local destination =
+		playerRoot.Position
+		+ Vector3.new(0, 2, 0)
+
+	local direction =
+		destination - origin
+
+	local distance =
+		direction.Magnitude
+
+	if distance > 45 then
+		return false
+	end
+
+	local params =
+		RaycastParams.new()
+
+	params.FilterType =
+		Enum.RaycastFilterType.Exclude
+
+	params.FilterDescendantsInstances = {
+		companion,
+		currentCharacter
+	}
+
+	local result =
+		workspace:Raycast(
+			origin,
+			direction,
+			params
+		)
+
+	return result == nil
+end
+
+
+local function noticePlayer()
+
+	if hasNoticedPlayer then
+		return
+	end
+
+	hasNoticedPlayer = true
+	strangerPhase = false
+
+	-- Seeing the player starts the approach immediately.
+	-- Do NOT put the NPC into relationshipTalking here; that state
+	-- is reserved for after the NPC reaches the player.
+	approachPhase = true
+	socialApproachActive = false
+	relationshipTalking = false
+	relationshipTalkUntil = 0
+
+	wanderOffset =
+		Vector3.zero
+
+	wandering = false
+	doingQuirk = false
+
+	stopTrack(quirkTrack)
+
+	if idleTrack
+		and not idleTrack.IsPlaying then
+
+		idleTrack:Play(0.2)
+	end
+
+
+	local noticeLines = {
+		"Wait... is that you?",
+		"Oh. Hey.",
+		"Huh. Didn't see you there.",
+		"Hey... what are you doing?",
+		"Oh, you're here.",
+		"Didn't expect to see you.",
+		"Hold on... I know you.",
+		"Hey. You again."
+	}
+
+	say(
+		noticeLines[
+			random:NextInteger(
+				1,
+				#noticeLines
+			)
+		]
+	)
+
+
+	task.delay(
+		random:NextNumber(1.2, 2.8),
+		function()
+
+			if not companion
+				or not companion.Parent then
+
+				return
+			end
+
+			if not approachPhase then
+				return
+			end
+
+			say(
+				"Um... hi."
+			)
+		end
+	)
+end
+
+
+local function startFollowing()
+
+	if followConnection then
+
+		followConnection:Disconnect()
+
+		followConnection = nil
+	end
+
+	wanderOffset =
+		Vector3.zero
+
+	wanderTimer = 0
+
+	nextWanderTime =
+		random:NextNumber(
+			2,
+			5
+		)
+
+	wandering = false
+	doingQuirk = false
+	socialApproachActive = false
+	socialApproachTimer = 0
+	nextSocialApproachTime =
+		random:NextNumber(
+			SOCIAL_APPROACH_MIN_TIME,
+			SOCIAL_APPROACH_MAX_TIME
+		)
+	socialApproachDuration = 0
+	socialTalkActive = false
+	socialTalkUntil = 0
+
+	dialogueTimer = 0
+	relationshipTalking = false
+	relationshipTalkUntil = 0
+
+	nextDialogueTime =
+		random:NextNumber(
+			DIALOGUE_MIN_TIME,
+			DIALOGUE_MAX_TIME
+		)
+
+	quirkTimer = 0
+
+	nextQuirkTime =
+		random:NextNumber(
+			QUIRK_MIN_TIME,
+			QUIRK_MAX_TIME
+		)
+
+	crushRollTimer = 0
+
+	nextCrushRoll =
+		random:NextNumber(
+			35,
+			75
+		)
+
+	followConnection =
+		RunService.RenderStepped:Connect(
+			function(deltaTime)
+
+				if not companion
+					or not companion.Parent
+					or not companionRoot then
+
+					return
+				end
+
+				local character =
+					player.Character
+
+				if not character then
+					return
+				end
+
+				currentCharacter =
+					character
+
+				local playerRoot =
+					character:
+						FindFirstChild(
+							"HumanoidRootPart"
+						)
+
+				if not playerRoot then
+					return
+				end
+
+				local profile =
+					currentProfile
+					or {
+						WanderDistance = 2,
+						WalkSpeed =
+							FOLLOW_SPEED
+					}
+
+				local currentPosition =
+					companionRoot.Position
+
+				local speed =
+					profile.WalkSpeed
+					or FOLLOW_SPEED
+
+				dialogueTimer +=
+					deltaTime
+
+				quirkTimer +=
+					deltaTime
+
+
+				if friendshipEnabled
+					and not hasNoticedPlayer then
+
+					noticeTimer +=
+						deltaTime
+
+
+					wanderTimer +=
+						deltaTime
+
+					if wanderTimer >=
+						nextWanderTime then
+
+						chooseStrangerWander()
+					end
+
+					local strangerTarget =
+						strangerHomePosition
+						or currentPosition
+
+					local desiredPosition =
+						strangerTarget
+						+ wanderOffset
+
+					desiredPosition =
+						Vector3.new(
+							desiredPosition.X,
+							currentPosition.Y,
+							desiredPosition.Z
+						)
+
+					local offset =
+						desiredPosition
+						- currentPosition
+
+					local distance =
+						offset.Magnitude
+
+					if distance > 1.3 then
+
+						moveCompanionTowards(
+							currentPosition,
+							desiredPosition,
+							speed,
+							deltaTime
+						)
+
+						if walkTrack
+							and not walkTrack.IsPlaying then
+
+							stopTrack(idleTrack)
+							stopTrack(quirkTrack)
+
+							walkTrack:Play(0.15)
+						end
+
+					else
+
+						if walkTrack
+							and walkTrack.IsPlaying then
+
+							walkTrack:Stop(0.2)
+						end
+
+						if idleTrack
+							and not idleTrack.IsPlaying then
+
+							idleTrack:Play(0.2)
+						end
+					end
+
+
+					if noticeTimer >=
+						nextNoticeTime then
+
+						local visible =
+							canSeePlayer(
+								playerRoot
+							)
+
+						local closeEnough =
+							(
+								playerRoot.Position
+								- companionRoot.Position
+							).Magnitude
+							<= 35
+
+						if visible
+							and closeEnough then
+
+							noticePlayer()
+
+						else
+
+							noticeTimer = 0
+
+							nextNoticeTime =
+								random:NextNumber(
+									5,
+									14
+								)
+						end
+					end
+
+					return
+				end
+
+
+				if friendshipEnabled
+					and hasNoticedPlayer
+					and relationshipTalking then
+
+					local talkDistance =
+						getRelationshipTalkDistance()
+
+					local playerDistance =
+						(
+							playerRoot.Position
+							- companionRoot.Position
+						).Magnitude
+
+					-- IMPORTANT: always end the talking state when its timer
+					-- expires. Previously this was checked ONLY inside the
+					-- distance check, so if the player moved away during the
+					-- first stranger conversation, the NPC could stay frozen
+					-- forever while continuing to talk.
+					if os.clock() >= relationshipTalkUntil then
+						relationshipTalking = false
+						dialogueTimer = 0
+						wanderTimer = 0
+						wandering = false
+						doingQuirk = false
+						wanderOffset = Vector3.zero
+						nextWanderTime = random:NextNumber(2, 5)
+
+						-- Do NOT return here. Let the normal movement code
+						-- run immediately so the NPC starts moving again.
+					else
+						stopTrack(walkTrack)
+						stopTrack(quirkTrack)
+
+						if idleTrack
+							and not idleTrack.IsPlaying then
+							idleTrack:Play(0.2)
+						end
+
+						-- Face the player while actually talking.
+						if playerDistance <= talkDistance + 4 then
+							local face =
+								playerRoot.Position
+								- companionRoot.Position
+
+							face =
+								Vector3.new(
+									face.X,
+									0,
+									face.Z
+								)
+
+							if face.Magnitude > 0.01 then
+								companion:PivotTo(
+									CFrame.lookAt(
+										companionRoot.Position,
+										companionRoot.Position + face.Unit
+									)
+								)
+							end
+						end
+
+						return
+					end
+				end
+
+				if dialogueTimer >=
+					nextDialogueTime
+					and not approachPhase
+					and not doingQuirk then
+
+					if random:NextNumber()
+						< 0.72 then
+
+						randomChat()
+					end
+
+					dialogueTimer = 0
+
+					local stage =
+						getRelationshipStage(
+							friendshipValue
+						)
+
+
+					if stage.Name ==
+						"Acquaintance" then
+
+						nextDialogueTime =
+							random:NextNumber(
+								9,
+								20
+							)
+
+					elseif stage.Name ==
+						"Friend" then
+
+						nextDialogueTime =
+							random:NextNumber(
+								7,
+								16
+							)
+
+					elseif stage.Name ==
+						"Best Friend" then
+
+						nextDialogueTime =
+							random:NextNumber(
+								5,
+								12
+							)
+
+					else
+
+						nextDialogueTime =
+							random:NextNumber(
+								DIALOGUE_MIN_TIME,
+								DIALOGUE_MAX_TIME
+							)
+					end
+				end
+
+
+				checkForCrush(deltaTime)
+
+
+				checkRelationshipMilestone()
+
+
+				if approachPhase then
+
+					-- Walk directly toward the player.
+					-- STOP_DISTANCE below determines how close the NPC gets.
+					local targetPosition =
+						playerRoot.Position
+
+					targetPosition =
+						Vector3.new(
+							targetPosition.X,
+							currentPosition.Y,
+							targetPosition.Z
+						)
+
+					local approachOffset =
+						targetPosition
+						- currentPosition
+
+					local approachDistance =
+						approachOffset.Magnitude
+
+					if approachDistance <=
+						FRIENDSHIP_APPROACH_DISTANCE then
+
+						approachPhase = false
+
+						playFirstMeeting()
+
+						wanderTimer = 0
+
+						nextWanderTime = 3
+
+						wandering = false
+						doingQuirk = false
+
+						if walkTrack
+							and walkTrack.IsPlaying then
+
+							walkTrack:Stop(0.2)
+						end
+
+						if idleTrack
+							and not idleTrack.IsPlaying then
+
+							idleTrack:Play(0.2)
+						end
+
+					else
+
+						moveCompanionTowards(
+							currentPosition,
+							targetPosition,
+							speed,
+							deltaTime
+						)
+
+						if walkTrack
+							and not walkTrack.IsPlaying then
+
+							stopTrack(idleTrack)
+							stopTrack(quirkTrack)
+
+							walkTrack:Play(0.15)
+						end
+
+						return
+					end
+				end
+
+
+				if quirkTimer >=
+					nextQuirkTime
+					and not doingQuirk
+					and not approachPhase then
+
+					if quirkTrack
+						and random:NextNumber()
+							< 0.45 then
+
+						doingQuirk = true
+
+						stopTrack(idleTrack)
+
+						if quirkTrack
+							and not quirkTrack.IsPlaying then
+
+							quirkTrack:Play(0.2)
+						end
+
+						quirkTimer = 0
+
+						nextQuirkTime =
+							random:NextNumber(
+								QUIRK_MIN_TIME,
+								QUIRK_MAX_TIME
+							)
+
+					else
+
+						quirkTimer = 0
+
+						nextQuirkTime =
+							random:NextNumber(
+								QUIRK_MIN_TIME,
+								QUIRK_MAX_TIME
+							)
+					end
+				end
+
+
+				if doingQuirk then
+
+					local followTarget =
+						playerRoot.Position
+						+ playerRoot.CFrame.RightVector
+							* FOLLOW_DISTANCE
+
+					local distance =
+						(
+							followTarget
+							- currentPosition
+						).Magnitude
+
+					if distance >
+						STOP_DISTANCE + 1.5 then
+
+						doingQuirk = false
+
+						stopTrack(quirkTrack)
+
+						if idleTrack
+							and not idleTrack.IsPlaying then
+
+							idleTrack:Play(0.2)
+						end
+
+					else
+
+						wanderTimer +=
+							deltaTime
+
+						if wanderTimer >=
+							random:NextNumber(
+								3,
+								7
+							) then
+
+							doingQuirk = false
+
+							stopTrack(
+								quirkTrack
+							)
+
+							if idleTrack
+								and not idleTrack.IsPlaying then
+
+								idleTrack:Play(0.2)
+							end
+
+							wanderTimer = 0
+
+							nextWanderTime =
+								random:NextNumber(
+									WANDER_MIN_TIME,
+									WANDER_MAX_TIME
+								)
+						end
+
+						return
+					end
+				end
+
+
+				local relationshipStage =
+					getMovementRelationshipStage()
+
+				if friendshipEnabled
+					and (
+						relationshipStage == "Stranger"
+						or relationshipStage == "Acquaintance"
+					) then
+
+					-- AFTER REACHING THE PLAYER:
+					-- Stay stopped/facing the player for 3-5 seconds,
+					-- then return to normal independent wandering.
+					if socialTalkActive then
+
+						stopTrack(walkTrack)
+						stopTrack(quirkTrack)
+
+						if idleTrack
+							and not idleTrack.IsPlaying then
+
+							idleTrack:Play(0.2)
+						end
+
+						local face =
+							playerRoot.Position
+							- companionRoot.Position
+
+						face =
+							Vector3.new(
+								face.X,
+								0,
+								face.Z
+							)
+
+						if face.Magnitude > 0.01 then
+
+							companion:PivotTo(
+								CFrame.lookAt(
+									companionRoot.Position,
+									companionRoot.Position
+										+ face.Unit
+								)
+							)
+						end
+
+						if os.clock() >= socialTalkUntil then
+
+							socialTalkActive = false
+							socialTalkUntil = 0
+
+							relationshipTalking = false
+							relationshipTalkUntil = 0
+
+							dialogueTimer = 0
+							wanderTimer = 0
+							wandering = false
+							doingQuirk = false
+
+							wanderOffset = Vector3.zero
+
+							socialApproachTimer = 0
+							nextSocialApproachTime =
+								random:NextNumber(
+									SOCIAL_APPROACH_MIN_TIME,
+									SOCIAL_APPROACH_MAX_TIME
+								)
+
+							nextWanderTime =
+								random:NextNumber(
+									2,
+									5
+								)
+						end
+
+						return
+					end
+
+					-- COUNT DOWN UNTIL THE NPC DECIDES TO APPROACH.
+					socialApproachTimer += deltaTime
+
+					if not socialApproachActive
+						and socialApproachTimer >= nextSocialApproachTime then
+
+						beginSocialApproach()
+						socialApproachTimer = 0
+					end
+
+					if socialApproachActive then
+
+						-- WALK TO THE PLAYER FIRST.
+						local socialDistance =
+							relationshipStage == "Acquaintance"
+							and ACQUAINTANCE_SOCIAL_DISTANCE
+							or STRANGER_SOCIAL_DISTANCE
+
+						local socialTarget =
+							playerRoot.Position
+							+ playerRoot.CFrame.RightVector
+							* socialDistance
+
+						socialTarget =
+							Vector3.new(
+								socialTarget.X,
+								currentPosition.Y,
+								socialTarget.Z
+							)
+
+						local socialOffset =
+							socialTarget
+							- currentPosition
+
+						if socialOffset.Magnitude <= 1.5 then
+
+							-- WE HAVE REACHED THE PLAYER.
+							-- Stop before saying anything.
+							socialApproachActive = false
+							socialApproachTimer = 0
+							socialApproachDuration = 0
+
+							wanderOffset = Vector3.zero
+							wandering = false
+							doingQuirk = false
+
+							stopTrack(walkTrack)
+							stopTrack(quirkTrack)
+
+							if idleTrack
+								and not idleTrack.IsPlaying then
+
+								idleTrack:Play(0.2)
+							end
+
+							local face =
+								playerRoot.Position
+								- companionRoot.Position
+
+							face =
+								Vector3.new(
+									face.X,
+									0,
+									face.Z
+								)
+
+							if face.Magnitude > 0.01 then
+
+								companion:PivotTo(
+									CFrame.lookAt(
+										companionRoot.Position,
+										companionRoot.Position
+											+ face.Unit
+									)
+								)
+							end
+
+							-- TALK ONCE, ONLY AFTER ARRIVING.
+							socialTalkActive = true
+
+							socialTalkUntil =
+								os.clock()
+								+ random:NextNumber(
+									3,
+									5
+								)
+
+							if not firstMeetingPlayed then
+								playFirstMeeting()
+							else
+								randomChat()
+							end
+
+							return
+
+						elseif socialApproachTimer >= socialApproachDuration then
+
+							-- Approach timed out: no dialogue; go back to wandering.
+							endSocialApproach()
+
+						else
+
+							moveCompanionTowards(
+								currentPosition,
+								socialTarget,
+								speed,
+								deltaTime
+							)
+
+							if walkTrack
+								and not walkTrack.IsPlaying then
+
+								stopTrack(idleTrack)
+								stopTrack(quirkTrack)
+
+								walkTrack:Play(0.15)
+							end
+
+							return
+						end
+					end
+
+					-- NORMAL STRANGER/ACQUAINTANCE WANDERING.
+					wanderTimer += deltaTime
+
+					if wanderTimer >= nextWanderTime then
+						chooseIdleAction()
+					end
+
+					local home =
+						strangerHomePosition
+						or currentPosition
+
+					local independentTarget =
+						home + wanderOffset
+
+					independentTarget =
+						Vector3.new(
+							independentTarget.X,
+							currentPosition.Y,
+							independentTarget.Z
+						)
+
+					local independentOffset =
+						independentTarget
+						- currentPosition
+
+					if independentOffset.Magnitude > 1.3 then
+
+						moveCompanionTowards(
+							currentPosition,
+							independentTarget,
+							speed,
+							deltaTime
+						)
+
+						if walkTrack
+							and not walkTrack.IsPlaying then
+
+							stopTrack(idleTrack)
+							stopTrack(quirkTrack)
+
+							walkTrack:Play(0.15)
+						end
+
+					else
+
+						if walkTrack
+							and walkTrack.IsPlaying then
+
+							walkTrack:Stop(0.2)
+						end
+
+						if not doingQuirk
+							and idleTrack
+							and not idleTrack.IsPlaying then
+
+							idleTrack:Play(0.2)
+						end
+					end
+
+					return
+				end
+
+
+				wanderTimer += deltaTime
+
+				if wanderTimer >= nextWanderTime then
+					chooseIdleAction()
+				end
+
+				local basePosition =
+					playerRoot.Position
+					+ playerRoot.CFrame.RightVector
+						* FOLLOW_DISTANCE
+
+				local desiredPosition =
+					basePosition
+					+ wanderOffset
+
+				desiredPosition =
+					Vector3.new(
+						desiredPosition.X,
+						currentPosition.Y,
+						desiredPosition.Z
+					)
+
+				local offset =
+					desiredPosition
+					- currentPosition
+
+				local distance =
+					offset.Magnitude
+
+
+				if distance >
+					TELEPORT_DISTANCE then
+
+					local teleportPosition =
+						basePosition
+
+					local direction =
+						playerRoot.Position
+						- teleportPosition
+
+					if direction.Magnitude
+						< 0.01 then
+
+						direction =
+							Vector3.new(
+								0,
+								0,
+								-1
+							)
+
+					else
+
+						direction =
+							direction.Unit
+					end
+
+					companion:PivotTo(
+						CFrame.lookAt(
+							teleportPosition,
+							teleportPosition
+								+ direction
+						)
+					)
+
+					wanderOffset =
+						Vector3.zero
+
+					wandering = false
+
+					return
+				end
+
+
+				if distance >
+					STOP_DISTANCE then
+
+					moveCompanionTowards(
+						currentPosition,
+						desiredPosition,
+						speed,
+						deltaTime
+					)
+
+					if walkTrack
+						and not walkTrack.IsPlaying then
+
+						stopTrack(idleTrack)
+						stopTrack(quirkTrack)
+
+						walkTrack:Play(0.15)
+					end
+
+				else
+
+					wandering = false
+
+					if walkTrack
+						and walkTrack.IsPlaying then
+
+						walkTrack:Stop(0.2)
+					end
+
+					if not doingQuirk then
+
+						if idleTrack
+							and not idleTrack.IsPlaying then
+
+							idleTrack:Play(0.2)
+						end
+					end
+				end
+			end
+		)
+end
+
+
+local function removeCompanion()
+
+	if followConnection then
+
+		followConnection:Disconnect()
+
+		followConnection = nil
+	end
+
+	stopTrack(idleTrack)
+	stopTrack(walkTrack)
+	stopTrack(quirkTrack)
+
+	if idleTrack then
+		pcall(function()
+			idleTrack:Destroy()
+		end)
+	end
+
+	if walkTrack then
+		pcall(function()
+			walkTrack:Destroy()
+		end)
+	end
+
+	if quirkTrack then
+		pcall(function()
+			quirkTrack:Destroy()
+		end)
+	end
+
+	idleTrack = nil
+	walkTrack = nil
+	quirkTrack = nil
+
+	companionHumanoid = nil
+	companionRoot = nil
+	currentProfile = nil
+
+	wanderOffset =
+		Vector3.zero
+
+	wanderTimer = 0
+	wandering = false
+	doingQuirk = false
+
+	friendshipBar = nil
+	friendshipFill = nil
+	friendshipLabel = nil
+	relationshipStatusLabel = nil
+
+	approachPhase = false
+	firstMeetingPlayed = false
+
+	strangerPhase = false
+	noticeTimer = 0
+	nextNoticeTime = 0
+	hasNoticedPlayer = false
+	strangerHomePosition = nil
+
+	dialogueTimer = 0
+	relationshipTalking = false
+	relationshipTalkUntil = 0
+	socialTalkActive = false
+	socialTalkUntil = 0
+	quirkTimer = 0
+
+	crushRollTimer = 0
+	nextCrushRoll = 0
+
+
+	if companion then
+
+		companion:Destroy()
+
+		companion = nil
+	end
+end
+
+
+local function createLocalCompanion(
+	userId,
+	aiName,
+	personality
+)
+
+	removeCompanion()
+
+	local character =
+		player.Character
+
+	if not character then
+		return false, "No character."
+	end
+
+	local playerRoot =
+		character:
+			FindFirstChild(
+				"HumanoidRootPart"
+			)
+
+	if not playerRoot then
+		return false,
+			"Character is not ready."
+	end
+
+	currentCharacter =
+		character
+
+	local model
+
+	if userId == player.UserId then
+
+		model =
+			character:Clone()
+
+	else
+
+		local descriptionSuccess,
+			description =
+
+			pcall(function()
+
+				return Players:
+					GetHumanoidDescriptionFromUserId(
+						userId
+					)
+			end)
+
+		if descriptionSuccess
+			and description then
+
+			local modelSuccess,
+				result =
+
+				pcall(function()
+
+					return Players:
+						CreateHumanoidModelFromDescription(
+							description,
+							Enum.HumanoidRigType.R15
+						)
+				end)
+
+			if modelSuccess
+				and result then
+
+				model = result
+			end
+		end
+	end
+
+	if not model then
+
+		return false,
+			"Roblox did not allow the avatar to be created locally."
+	end
+
+	model.Name =
+		aiName
+
+	prepareCompanion(model)
+
+	model.Parent =
+		workspace
+
+	companion =
+		model
+
+	companionHumanoid =
+		model:FindFirstChildOfClass(
+			"Humanoid"
+		)
+
+	companionRoot =
+		model:FindFirstChild(
+			"HumanoidRootPart"
+		)
+
+	if not companionHumanoid
+		or not companionRoot then
+
+		removeCompanion()
+
+		return false,
+			"Avatar is missing its R15 HumanoidRootPart."
+	end
+
+	currentProfile =
+		getPersonalityProfile(
+			personality
+		)
+
+	companionHumanoid.AutoJumpEnabled =
+		false
+
+	companionHumanoid.JumpPower =
+		0
+
+	companionHumanoid.DisplayDistanceType =
+		Enum.HumanoidDisplayDistanceType.None
+
+
+	local spawnPosition
+
+	if friendshipEnabled then
+
+
+		spawnPosition =
+			playerRoot.Position
+			+ playerRoot.CFrame.LookVector
+				* FRIENDSHIP_SPAWN_DISTANCE
+
+	else
+
+		spawnPosition =
+			playerRoot.Position
+			+ playerRoot.CFrame.RightVector
+				* FOLLOW_DISTANCE
+	end
+
+	spawnPosition +=
+		Vector3.new(
+			0,
+			0.1,
+			0
+		)
+
+	local lookDirection =
+		playerRoot.Position
+		- spawnPosition
+
+	if lookDirection.Magnitude < 0.01 then
+
+		lookDirection =
+			Vector3.new(
+				0,
+				0,
+				-1
+			)
+
+	else
+
+		lookDirection =
+			lookDirection.Unit
+	end
+
+	model:PivotTo(
+		CFrame.lookAt(
+			spawnPosition,
+			spawnPosition
+				+ lookDirection
+		)
+	)
+
+	createNameTag(
+		model,
+		aiName
+	)
+
+
+	if friendshipEnabled then
+
+
+		if savedAI == nil then
+
+			friendshipValue = 0
+			crushActive = false
+
+		end
+
+		createFriendshipMeter(
+			model
+		)
+
+		updateFriendshipMeter()
+
+
+		strangerPhase = true
+
+		hasNoticedPlayer = false
+
+		approachPhase = false
+
+		firstMeetingPlayed = false
+
+		noticeTimer = 0
+
+		-- First stranger interaction is proximity/visibility based.
+		-- The NPC can notice the player immediately instead of making
+		-- the player walk up to it or wait 12-24 seconds.
+		nextNoticeTime = 0
+
+		strangerHomePosition =
+			spawnPosition
+
+	else
+
+		strangerPhase = false
+
+		hasNoticedPlayer = true
+
+		approachPhase = false
+	end
+
+	setupAnimations(
+		companionHumanoid,
+		currentProfile
+	)
+
+	startFollowing()
+
+	return true
+end
+
+
+local function buildPersonality()
+
+	local personality =
+		personalityBox.Text
+
+	local selected = {}
+
+	for trait, enabled in pairs(
+		selectedTraits
+	) do
+
+		if enabled then
+
+			table.insert(
+				selected,
+				trait
+			)
+		end
+	end
+
+	if #selected > 0 then
+
+		if personality ~= "" then
+
+			personality =
+				personality
+				.. "\n\nTraits: "
+				.. table.concat(
+					selected,
+					", "
+				)
+
+		else
+
+			personality =
+				"Traits: "
+				.. table.concat(
+					selected,
+					", "
+				)
+		end
+	end
+
+	return personality
+end
+
+
+local function verifyFriend(userId)
+
+	if userId ==
+		player.UserId then
+
+		return true
+	end
+
+	for _, friend in ipairs(
+		friendList
+	) do
+
+		if tonumber(friend.Id)
+			== tonumber(userId) then
+
+			return true
+		end
+	end
+
+	local success, result =
+		pcall(function()
+
+			return player:
+				IsFriendsWith(
+					userId
+				)
+		end)
+
+	if success then
+		return result == true
+	end
+
+	return false
+end
+
+
+createButton.Activated:Connect(
+	function()
+
+		if companionCreated then
+			return
+		end
+
+		play(clickSound)
+
+		local aiName =
+			nameBox.Text:gsub(
+				"%s+",
+				" "
+			)
+
+		aiName =
+			aiName:match(
+				"^%s*(.-)%s*$"
+			)
+
+		if not aiName
+			or aiName == "" then
+
+			status.Text =
+				"Give your AI a name."
+
+			play(errorSound)
+
+			return
+		end
+
+		local personality =
+			buildPersonality()
+
+		if personality:gsub(
+			"%s+",
+			""
+		) == "" then
+
+			status.Text =
+				"Give your AI a personality."
+
+			play(errorSound)
+
+			return
+		end
+
+		local callsPlayer =
+			callsBox.Text:gsub(
+				"%s+",
+				" "
+			)
+
+		callsPlayer =
+			callsPlayer:match(
+				"^%s*(.-)%s*$"
+			)
+
+		if not callsPlayer
+			or callsPlayer == "" then
+
+			status.Text =
+				"Tell your AI what to call you."
+
+			play(errorSound)
+
+			return
+		end
+
+		local avatarUserId =
+			player.UserId
+
+		if selectedMode == "User" then
+
+			if usernameBox.Text:gsub(
+				"%s+",
+				""
+			) == "" then
+
+				status.Text =
+					"Enter a username."
+
+				play(errorSound)
+
+				return
+			end
+
+			status.Text =
+				"Looking up avatar..."
+
+			local userId =
+				getUserId(
+					usernameBox.Text
+				)
+
+			if not userId then
+
+				status.Text =
+					"Username not found."
+
+				play(errorSound)
+
+				return
+			end
+
+			avatarUserId =
+				userId
+
+		elseif selectedMode == "Friend" then
+
+			if not selectedFriend then
+
+				status.Text =
+					"Choose a friend first."
+
+				play(errorSound)
+
+				return
+			end
+
+			avatarUserId =
+				tonumber(
+					selectedFriend.Id
+				)
+
+			if not avatarUserId then
+
+				status.Text =
+					"Invalid friend selection."
+
+				play(errorSound)
+
+				return
+			end
+
+			status.Text =
+				"Checking friendship..."
+
+			if not verifyFriend(
+				avatarUserId
+			) then
+
+				status.Text =
+					"That user isn't your friend."
+
+				play(errorSound)
+
+				return
+			end
+		end
+
+
+		savedAI = {
+			Name = aiName,
+
+			Personality =
+				personality,
+
+			CallsPlayer =
+				callsPlayer,
+
+			AvatarUserId =
+				avatarUserId,
+
+			AvatarMode =
+				selectedMode,
+
+			FriendshipEnabled =
+				friendshipEnabled
+		}
+
+
+		friendshipValue = 0
+		crushActive = false
+		lastRelationshipStage =
+			"Stranger"
+
+		status.Text =
+			"Creating your AI..."
+
+		createButton.Visible =
+			false
+
+		local success,
+			errorMessage =
+
+			createLocalCompanion(
+				avatarUserId,
+				aiName,
+				personality
+			)
+
+		if not success then
+
+			createButton.Visible =
+				true
+
+			status.Text =
+				tostring(
+					errorMessage
+					or "Could not create AI."
+				)
+
+			savedAI = nil
+
+			play(errorSound)
+
+			return
+		end
+
+		companionCreated =
+			true
+
+		if friendshipEnabled then
+			friendshipDescription.Text =
+				"Locked on. Use START OVER to change it."
+		end
+
+		startOverButton.Visible =
+			true
+
+		status.Text =
+			aiName
+			.. " is alive!"
+
+		play(successSound)
+	end
+)
+
+
+startOverButton.Activated:Connect(
+	function()
+
+		if not companionCreated then
+			return
+		end
+
+		play(deleteSound)
+
+		removeCompanion()
+
+		companionCreated =
+			false
+
+		savedAI = nil
+
+
+		friendshipValue = 0
+		crushActive = false
+
+		-- START OVER unlocks Friendship Mode again for the next AI.
+		setFriendshipToggle(false)
+		friendshipDescription.Text =
+			"Start distant and build friendship."
+
+		lastRelationshipStage =
+			"Stranger"
+
+		createButton.Visible =
+			true
+
+		startOverButton.Visible =
+			false
+
+		status.Text =
+			"AI deleted. Ready to create another."
+	end
+)
+
+
+local function openPanel()
+
+	play(openSound)
+
+	panel.Visible =
+		true
+
+	panelScale.Scale =
+		0.9
+
+	tween(
+		panelScale,
+		0.3,
+		{
+			Scale = 1
+		}
+	)
+
+	openButton.Visible =
+		false
+end
+
+local function closePanel()
+
+	play(clickSound)
+
+	tween(
+		panelScale,
+		0.18,
+		{
+			Scale = 0.9
+		}
+	)
+
+	task.delay(
+		0.18,
+		function()
+
+			panel.Visible =
+				false
+		end
+	)
+
+	openButton.Visible =
+		true
+end
+
+openButton.Activated:Connect(
+	openPanel
+)
+
+closeButton.Activated:Connect(
+	closePanel
+)
+
+
+local function buttonPress(button)
+
+	local original =
+		button.Size
+
+	button.InputBegan:Connect(
+		function(input)
+
+			if input.UserInputType ==
+				Enum.UserInputType.Touch
+
+				or input.UserInputType ==
+				Enum.UserInputType.MouseButton1 then
+
+				tween(
+					button,
+					0.08,
+					{
+						Size =
+							UDim2.new(
+								original.X.Scale,
+								original.X.Offset - 3,
+								original.Y.Scale,
+								original.Y.Offset - 3
+							)
+					}
+				)
+			end
+		end
+	)
+
+	button.InputEnded:Connect(
+		function(input)
+
+			if input.UserInputType ==
+				Enum.UserInputType.Touch
+
+				or input.UserInputType ==
+				Enum.UserInputType.MouseButton1 then
+
+				tween(
+					button,
+					0.1,
+					{
+						Size =
+							original
+					}
+				)
+			end
+		end
+	)
+end
+
+buttonPress(openButton)
+buttonPress(closeButton)
+buttonPress(createButton)
+buttonPress(startOverButton)
+
+
+player.CharacterAdded:Connect(
+	function(character)
+
+		currentCharacter =
+			character
+
+		if not savedAI then
+
+			removeCompanion()
+
+			return
+		end
+
+
+		removeCompanion()
+
+		character:
+			WaitForChild(
+				"HumanoidRootPart"
+			)
+
+		character:
+			WaitForChild(
+				"Humanoid"
+			)
+
+		task.wait(0.75)
+
+		if savedAI then
+
+			friendshipEnabled =
+				savedAI.FriendshipEnabled
+				== true
+
+			local success,
+				errorMessage =
+
+				createLocalCompanion(
+					savedAI.AvatarUserId,
+					savedAI.Name,
+					savedAI.Personality
+				)
+
+			if success then
+
+				companionCreated =
+					true
+
+				status.Text =
+					savedAI.Name
+					.. " is back!"
+
+			else
+
+				status.Text =
+					"AI could not respawn: "
+					.. tostring(
+						errorMessage
+						or "Unknown error."
+					)
+			end
+		end
+	end
+)
+
+
+currentCharacter =
+	player.Character
+
+local camera =
+	workspace.CurrentCamera
+
+local function updateScale()
+
+	camera =
+		workspace.CurrentCamera
+
+	if not camera then
+		return
+	end
+
+	local viewport =
+		camera.ViewportSize
+
+	if viewport.X <= 500 then
+
+		panel.Size =
+			UDim2.new(
+				0.94,
+				0,
+				0.88,
+				0
+			)
+
+	else
+
+		panel.Size =
+			UDim2.fromOffset(
+				PANEL_WIDTH,
+				PANEL_HEIGHT
+			)
+	end
+
+	if viewport.Y <= 650 then
+
+		panel.Size =
+			UDim2.new(
+				panel.Size.X.Scale,
+				panel.Size.X.Offset,
+				0.92,
+				0
+			)
+	end
+
+	if viewport.X <= 360 then
+
+		panelScale.Scale =
+			0.88
+
+	else
+
+		panelScale.Scale =
+			1
+	end
+end
+
+if camera then
+
+	camera:
+		GetPropertyChangedSignal(
+			"ViewportSize"
+		):Connect(
+			updateScale
+		)
+end
+
+updateScale()
+
+
+script.Destroying:Connect(
+	function()
+
+		removeCompanion()
+
+		for _, sound in ipairs(
+			SoundService:GetChildren()
+		) do
+
+			if sound.Name == "AI_Click"
+				or sound.Name == "AI_Open"
+				or sound.Name == "AI_Success"
+				or sound.Name == "AI_Delete"
+				or sound.Name == "AI_Error" then
+
+				sound:Destroy()
+			end
+		end
+	end
+)
 local SOCIAL_APPROACH_MAX_TIME = 22
 local SOCIAL_APPROACH_DURATION_MIN = 4
 local SOCIAL_APPROACH_DURATION_MAX = 9
